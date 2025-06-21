@@ -17,14 +17,14 @@ This project implements a Retrieval-Augmented Generation (RAG) system using **La
 
 ## 📁 Directory Structure
 
-├── data/ # Source documents
-├── embedder.py # Embedding and vector store logic
-├── file_process.py # Document loading and chunking
-├── retriever.py # Multi-query retriever logic
-├── main.py # App entry point
-├── constants.py # Configurable constants
-├── index/ # ChromaDB persistent storage
-└── README.md # You're here
+    ├── data/ # Source documents
+    ├── embedder.py # Embedding and vector store logic
+    ├── file_process.py # Document loading and chunking
+    ├── retriever.py # Multi-query retriever logic
+    ├── main.py # App entry point
+    ├── constants.py # Configurable constants
+    ├── index/ # ChromaDB persistent storage
+    └── README.md # You're here
 
 ---
 
@@ -39,16 +39,22 @@ This project implements a Retrieval-Augmented Generation (RAG) system using **La
    ```
 
 2. **Install dependencies**
+
+   ```bash
    pip install -r requirements.txt
+   ```
 
 3. **Install Ollama & run your LLM**
-   ollama run _your-llm_
-
+   ```bash
+   ollama run *your-llm*
+   ```
 4. **Add documents to your /data folder**
 
 ## 🧩 Running the RAG APP
 
+    ```bash
     python main.py
+    ```
 
 ## 🛠 Key Components
 
