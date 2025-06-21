@@ -1,19 +1,13 @@
 import logging
 from pathlib import Path
-from unstructured.partition.auto import partition
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
 from embedder import store_embeddings
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 from langchain_ollama import ChatOllama
 
+from file_process import hybrid_chunk 
 from retriever import create_retriever
 
-
-DATA_PATH = "./data"
-MODEL_NAME = "llama3.2"
-EMBEDDING_MODEL = "nomic-embed-text"
+from constants import SUPPORTED_EXTENSIONS, MODEL_NAME, DATA_PATH
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,77 +15,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def check_file_support(file_path:Path):
-    if file_path.suffix.lower() not in [".pdf", ".txt", ".md", ".docx"]:
-            return False
-    return True
-
-def split_documents(documents):
-    """Split documents into smaller chunks."""
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=300)
-    chunks = text_splitter.split_documents(documents)
-    logging.info("Documents split into chunks.")
-    return chunks
-
-def load_and_chunk(file_path: Path):
-   
-        #File checks 
-
-        if not file_path.is_file():
-            logger.debug("  → skipping (not a file)")
-            return []
-
-        if not check_file_support(file_path):
-            logger.debug(f"Skipping unsupported file type: {file_path}")
-            return []
-
-        logger.info(f"Processing file: {file_path}")
-
-        try:
-            with open(file_path, "rb") as f:
-                elements = partition(file=f, include_page_breaks=True)
-            
-            docs = []
-            for i, e in enumerate(elements):
-                if hasattr(e, "text") and e.text.strip():
-                    docs.append(Document(
-                        page_content=e.text,
-                        metadata={
-                            "source": str(file_path),
-                            "chunk_index": i
-                        }
-                    ))
-                logger.info(f"Extracted {len(docs)} text elements from {file_path}")
-            for doc in docs:
-                logger.debug(f"[CHUNK] {doc.page_content[:150]!r}")
-            return docs                
-        except Exception as e:
-            logger.error(f"Partition failed for {file_path}: {e}")
-            return []
-        
+def is_supported_file(file_path: Path) -> bool:
+    return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
+ 
 
 
 def create_chain(retriever, llm):
-    prompt = ChatPromptTemplate.from_template("""Answer the question based ONLY on the following context:
-{context}
-Question: {question}
-""")
-
-    chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-    )
+    prompt_template = ChatPromptTemplate.from_template("""Answer the question based ONLY on the following context:
+    {context}
+    Question: {question}
+    """)
 
     def wrapped_chain(inputs):
-        result = chain.invoke(inputs)
-        docs = retriever.invoke(inputs["query"])
+        query = inputs.get("query")
+        if not query:
+            raise ValueError("Missing 'query' in inputs")
+
+        # Retrieve relevant documents
+        docs = retriever.invoke(query)
+        context = "\n\n".join(doc.page_content for doc in docs)
+
+        # Format the final prompt
+        filled_prompt = prompt_template.format(context=context, question=query)
+
+        # Generate response
+        result = llm.invoke(filled_prompt, think=False)
+
         return {
-            "result": result.content if hasattr(result, "content") else str(result),
+            "result": getattr(result, "content", str(result)),
             "source_documents": docs
         }
 
     return wrapped_chain
+
 
 
 
@@ -101,25 +57,33 @@ def main(folder:str = DATA_PATH):
     
     logger.info(f"Looking for files under {folder}")
 
+    # Recursively find, load, and chunk documents inside the specified folder
     for file_path in Path(folder).rglob("*"):
-        docs = load_and_chunk(file_path)
-        if docs:
-            all_docs.extend(docs)
+
+        #Skip directories and unsupported files
+        if not file_path.is_file() or not is_supported_file(file_path):
+            continue
+
+        try:
+            chunks = hybrid_chunk(file_path)
+            if chunks:
+                all_docs.extend(chunks)
+        except Exception as e:
+            logger.error(f"Chunking failed for {file_path}: {e}")
+
     
-    if not all_docs:
-        logger.warning("No documents found to process.")
+    # If no documents were found, log a warning and exit
+    if not all_docs:    
+        logger.warning("No valid documents found to process.")
         return
 
-    logger.info(f"Total extracted documents: {len(all_docs)}")
+    logger.info(f"Total chunks collected: {len(all_docs)}")
 
-    chunks = split_documents(all_docs)
-    logger.info(f"Total text chunks: {len(chunks)}")
-
-    # Create the vector database
-    db = store_embeddings(chunks)
+    # Create the vector database using the chunks 
+    db = store_embeddings(all_docs)
 
     #Initialize LLM 
-    llm = ChatOllama(model= MODEL_NAME, temperature=0.1)
+    llm = ChatOllama(model= MODEL_NAME, temperature=0.4)
 
     #Create retriever
     retriever = create_retriever(db,llm)

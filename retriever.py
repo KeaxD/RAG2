@@ -1,4 +1,4 @@
-from langchain.prompts import ChatPromptTemplate, PromptTemplate
+from langchain.prompts import PromptTemplate
 from langchain.retrievers.multi_query import MultiQueryRetriever
 import logging
 
@@ -7,15 +7,15 @@ def create_retriever(vector_db, llm):
     QUERY_PROMPT = PromptTemplate(
         input_variables=["question"],
         template="""You are an AI language model assistant. Your task is to generate five
-different versions of the given user question to retrieve relevant documents from
-a vector database. By generating multiple perspectives on the user question, your
-goal is to help the user overcome some of the limitations of the distance-based
-similarity search. Provide these alternative questions separated by newlines.
-Original question: {question}""",
+        different versions of the given user question to retrieve relevant documents from
+        a vector database. By generating multiple perspectives on the user question, your
+        goal is to help the user overcome some of the limitations of the distance-based
+        similarity search. Provide these alternative questions separated by newlines.
+        Original question: {question}""",
     )
 
     retriever = MultiQueryRetriever.from_llm(
-        vector_db.as_retriever(), llm, prompt=QUERY_PROMPT
+        vector_db.as_retriever(search_type="mmr", search_kwargs={"k": 10, "lambda_mult": 0.5}), llm, prompt=QUERY_PROMPT
     )
     logging.info("Retriever created.")
     return retriever    
